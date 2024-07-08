@@ -1,7 +1,8 @@
 #![allow(clippy::missing_safety_doc)]
 
 use polodb_core::{DbContext, DbErr, DbHandle, TransactionType, Config};
-use polodb_bson::{ObjectId, Document, Array};
+use polodb_bson::{ObjectId, Document, Array, Value};
+use polodb_bson::ty_int::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::os::raw::{c_char, c_uint, c_int, c_double, c_longlong};
@@ -334,6 +335,115 @@ pub unsafe extern "C" fn PLDB_version(buffer: *mut c_char, buffer_size: c_uint) 
 #[no_mangle]
 pub unsafe extern "C" fn PLDB_close(db: *mut DbContext) {
     let _ptr = Box::from_raw(db);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn PLDB_mk_doc() -> *mut Rc<Document> {
+    let doc = Rc::new(Document::new_without_id());
+    let rdoc = Box::new(doc);
+    Box::into_raw(rdoc)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn PLDB_free_doc(doc: *mut Rc<Document>) {
+    let _ptr = Box::from_raw(doc);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn PLDB_doc_set(doc: *mut Rc<Document>, key: *const c_char, val: ValueMock) -> c_uint {
+    let pdoc = Box::from_raw(doc);
+    // let mut rdoc = Rc::clone(pdoc.as_ref());
+    let mut rdoc = *pdoc;
+    println!("rc count: {:?}", Rc::strong_count(&rdoc));
+
+    let ckey = CStr::from_ptr(key);
+    let rkey = ckey.to_str().unwrap();
+
+    // debug_mem(&val);
+    println!("val tag: {:?}", val.tag);
+    println!("val int: {:?}", val.value.int_value);
+    let v = value_parse(&val);
+
+    println!("parse val: {v}");
+    // TODO: 结果待处理
+    let _ = Rc::get_mut(&mut rdoc).unwrap().insert(rkey.to_string(), v);
+    0
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn PLDB_doc_get(doc: *mut Rc<Document>, key: *const c_char, val: *mut ValueMock) -> c_uint {
+    let mut rdoc = *Box::from_raw(doc);
+    let rkey = CStr::from_ptr(key).to_str().unwrap();
+
+    let rval = Rc::get_mut(&mut rdoc).unwrap().get(rkey).unwrap();
+
+    val = Box::into_raw(Box::new(rval.clone()));
+
+    0
+}
+
+unsafe fn value_build(val: &Value) -> ValueMock {
+    let v_inner = ValueUnion {};
+    match val.ty_int() {
+        NULL => v_inner.int_value = 0,
+    }
+
+    ValueMock {
+        tag: val.ty_int(),
+        value: v_inner,
+    }
+}
+
+unsafe fn value_parse(vmock: &ValueMock) -> Value {
+    let val = &(*vmock).value;
+    let tag = (*vmock).tag;
+    match tag {
+        NULL => Value::Null,
+        DOUBLE => Value::from(val.double_value),
+        BOOLEAN => Value::from(val.bool_value),
+        INT => Value::from(val.int_value),
+        STRING => {
+            let vstr = CStr::from_ptr(val.str as *mut c_char).to_str().unwrap();
+            Value::from(vstr)
+        },
+        OBJECT_ID => {
+            let oid = Box::from_raw(val.oid as *mut ObjectId);
+            Value::from(*oid)
+        },
+        ARRAY => {
+            let arr = Rc::clone(Box::from_raw(val.arr as *mut Rc<Array>).as_ref());
+            Value::from(arr.as_ref().clone())
+        },
+        DOCUMENT => {
+            let doc = Rc::clone(Box::from_raw(val.doc as *mut Rc<Document>).as_ref());
+            Value::from(doc.as_ref().clone())
+        },
+        BINARY => {
+            let bin = Rc::clone(Box::from_raw(val.bin as *mut Rc<Vec<u8>>).as_ref());
+            Value::from(bin.as_ref().clone())
+        },
+        UTC_DATETIME => Value::from(val.utc),
+
+        _ => Value::Null,
+    }
+}
+
+
+fn debug_mem(s: &ValueMock) {
+    // 获取结构体的字节表示
+    let bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(
+            s as *const ValueMock as *const u8,
+            std::mem::size_of::<ValueMock>()
+        )
+    };
+
+    // 打印字节流
+    print!("Bytes:");
+    for (_, byte) in bytes.iter().enumerate() {
+        print!(" {:#02x}", byte);
+    }
+    println!();
 }
 
 fn error_code_of_db_err(err: &DbErr) -> i32 {
