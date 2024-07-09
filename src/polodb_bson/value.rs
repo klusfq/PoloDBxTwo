@@ -7,7 +7,7 @@ use super::ObjectId;
 use super::document::Document;
 use super::array::Array;
 use super::hex;
-use crate::BsonResult;
+use crate::{object_id, BsonResult};
 use crate::error::BsonErr;
 use crate::datetime::UTCDateTime;
 use byteorder::{self, ReadBytesExt, BigEndian, WriteBytesExt};
@@ -407,9 +407,25 @@ impl Value {
     }
 
     #[inline]
+    pub fn unwrap_double(&self) -> f64 {
+        match self {
+            Value::Double(bl) => *bl,
+            _ => panic!("unwrap error: double expected, but it's {}", self.ty_name()),
+        }
+    }
+
+    #[inline]
     pub fn unwrap_int(&self) -> i64 {
         match self {
             Value::Int(i) => *i,
+            _ => panic!("unwrap error: int expected, but it's {}", self.ty_name()),
+        }
+    }
+
+    #[inline]
+    pub fn unwrap_utc(&self) -> &Rc<UTCDateTime> {
+        match self {
+            Value::UTCDateTime(i) => i,
             _ => panic!("unwrap error: int expected, but it's {}", self.ty_name()),
         }
     }
@@ -427,6 +443,14 @@ impl Value {
         match self {
             Value::Binary(bin) => bin,
             _ => panic!("unwrap error: binary expected, but it's {}", self.ty_name()),
+        }
+    }
+
+    #[inline]
+    pub fn unwrap_objectid(&self) -> &Rc<ObjectId> {
+        match self {
+            Value::ObjectId(bl) => bl,
+            _ => panic!("unwrap error: boolean expected, but it's {}", self.ty_name()),
         }
     }
 

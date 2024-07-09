@@ -351,9 +351,7 @@ pub unsafe extern "C" fn PLDB_free_doc(doc: *mut Rc<Document>) {
 
 #[no_mangle]
 pub unsafe extern "C" fn PLDB_doc_set(doc: *mut Rc<Document>, key: *const c_char, val: ValueMock) -> c_uint {
-    let pdoc = Box::from_raw(doc);
-    // let mut rdoc = Rc::clone(pdoc.as_ref());
-    let mut rdoc = *pdoc;
+    let rdoc = doc.as_mut().unwrap();
     println!("rc count: {:?}", Rc::strong_count(&rdoc));
 
     let ckey = CStr::from_ptr(key);
@@ -366,26 +364,62 @@ pub unsafe extern "C" fn PLDB_doc_set(doc: *mut Rc<Document>, key: *const c_char
 
     println!("parse val: {v}");
     // TODO: 结果待处理
-    let _ = Rc::get_mut(&mut rdoc).unwrap().insert(rkey.to_string(), v);
+    let _ = Rc::get_mut(rdoc).unwrap().insert(rkey.to_string(), v);
     0
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn PLDB_doc_get(doc: *mut Rc<Document>, key: *const c_char, val: *mut ValueMock) -> c_uint {
-    let mut rdoc = *Box::from_raw(doc);
+pub unsafe extern "C" fn PLDB_doc_get(doc: *mut Rc<Document>, key: *const c_char, out_val: *mut ValueMock) -> c_uint {
+    println!("call doc_get");
+    let rdoc = doc.as_ref().unwrap();
+
     let rkey = CStr::from_ptr(key).to_str().unwrap();
 
-    let rval = Rc::get_mut(&mut rdoc).unwrap().get(rkey).unwrap();
+    println!("call doc_get({}) from: {:p}", rkey, out_val);
+    let rval = rdoc.get(rkey).unwrap();
 
-    val = Box::into_raw(Box::new(rval.clone()));
+    out_val.write(value_build(rval));
+
+    println!("out val: {:p}", out_val);
 
     0
 }
 
 unsafe fn value_build(val: &Value) -> ValueMock {
-    let v_inner = ValueUnion {};
+    let mut v_inner = ValueUnion {
+        int_value: 0,
+    };
     match val.ty_int() {
         NULL => v_inner.int_value = 0,
+        DOUBLE => v_inner.double_value = val.unwrap_double(),
+        BOOLEAN => {
+            v_inner.bool_value = val.unwrap_boolean().into();
+        },
+        INT => v_inner.int_value = val.unwrap_int(),
+        STRING => v_inner.str = CString::new(val.unwrap_string().to_owned()).unwrap().into_raw(),
+        OBJECT_ID => {
+            let poid = val.unwrap_objectid();
+            v_inner.oid = Box::into_raw(Box::new(poid.as_ref().clone()));
+        },
+        ARRAY => {
+            let parr = val.unwrap_array();
+            v_inner.arr = Box::into_raw(Box::new(parr.clone()));
+        },
+        DOCUMENT => {
+            let pdoc = val.unwrap_document();
+            v_inner.doc = Box::into_raw(Box::new(pdoc.clone()));
+        },
+        BINARY => {
+            let pbin = val.unwrap_binary();
+            v_inner.bin = Box::into_raw(Box::new(pbin.clone()));
+        },
+        UTC_DATETIME => {
+            let putc = val.unwrap_utc();
+            v_inner.utc = putc.as_ref().timestamp();
+        },
+        _ => {
+            v_inner.int_value = 0;
+        }
     }
 
     ValueMock {
@@ -403,7 +437,8 @@ unsafe fn value_parse(vmock: &ValueMock) -> Value {
         BOOLEAN => Value::from(val.bool_value),
         INT => Value::from(val.int_value),
         STRING => {
-            let vstr = CStr::from_ptr(val.str as *mut c_char).to_str().unwrap();
+            let cvstr = CStr::from_ptr(val.str);
+            let vstr = try_read_utf8!(cvstr.to_str(), Value::Null);
             Value::from(vstr)
         },
         OBJECT_ID => {
