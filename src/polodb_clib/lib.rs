@@ -359,8 +359,9 @@ pub unsafe extern "C" fn PLDB_doc_set(doc: *mut Rc<Document>, key: *const c_char
     // debug_mem(&val);
     let v = value_parse(&val);
 
-    // TODO: 结果待处理
     let _ = Rc::get_mut(rdoc).unwrap().insert(rkey.to_string(), v);
+
+    // TODO: error handle
     0
 }
 
@@ -378,7 +379,15 @@ pub unsafe extern "C" fn PLDB_doc_get(doc: *mut Rc<Document>, key: *const c_char
 
     println!("out val: {:p}", out_val);
 
+    // TODO: error handle
     0
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn PLDB_doc_len(doc: *mut Rc<Document>) -> c_uint {
+    let rdoc = doc.as_ref().unwrap();
+    
+    rdoc.len() as c_uint
 }
 
 unsafe fn value_build(val: &Value) -> ValueMock {
