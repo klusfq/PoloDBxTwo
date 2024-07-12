@@ -9,6 +9,7 @@ use std::os::raw::{c_char, c_uint, c_int, c_double, c_longlong};
 use std::ptr::{null_mut, write_bytes, null};
 use std::ffi::{CStr, CString};
 use std::borrow::Borrow;
+use std::result;
 
 const DB_ERROR_MSG_SIZE: usize = 512;
 
@@ -350,7 +351,7 @@ pub unsafe extern "C" fn PLDB_free_doc(doc: *mut Rc<Document>) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn PLDB_doc_set(doc: *mut Rc<Document>, key: *const c_char, val: ValueMock) -> c_uint {
+pub unsafe extern "C" fn PLDB_doc_set(doc: *mut Rc<Document>, key: *const c_char, val: ValueMock) -> c_int {
     let rdoc = doc.as_mut().unwrap();
 
     let ckey = CStr::from_ptr(key);
@@ -366,13 +367,10 @@ pub unsafe extern "C" fn PLDB_doc_set(doc: *mut Rc<Document>, key: *const c_char
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn PLDB_doc_get(doc: *mut Rc<Document>, key: *const c_char, out_val: *mut ValueMock) -> c_uint {
-    println!("call doc_get");
+pub unsafe extern "C" fn PLDB_doc_get(doc: *mut Rc<Document>, key: *const c_char, out_val: *mut ValueMock) -> c_int {
     let rdoc = doc.as_ref().unwrap();
 
     let rkey = CStr::from_ptr(key).to_str().unwrap();
-
-    println!("call doc_get({}) from: {:p}", rkey, out_val);
     let rval = rdoc.get(rkey).unwrap();
 
     out_val.write(value_build(rval));
@@ -388,6 +386,65 @@ pub unsafe extern "C" fn PLDB_doc_len(doc: *mut Rc<Document>) -> c_uint {
     let rdoc = doc.as_ref().unwrap();
     
     rdoc.len() as c_uint
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn PLDB_doc_iter(doc: *mut Rc<Document>) -> *mut Iter<String, Value> {
+    // TODO:
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn PLDB_doc_iter_next(
+    iter: *mut Iter<String, Value>,
+    key_buffer: *mut c_char,
+    key_buffer_size: c_uint,
+    out_val: *mut ValueMock,
+) -> c_int {
+    // TODO:
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn PLDB_free_doc_iter(iter: *mut Iter<String, Value>) {
+    // TODO:
+
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn PLDB_step(handle: *mut DbHandle) -> c_int {
+    let result = handle.as_mut().unwrap().step();
+
+    match result {
+        Ok(_) => 0,
+        Err(err) => {
+            set_global_error(err);
+            PLDB_error_code()
+        },
+    }
+}
+
+#[no_mangle]
+pub unsafe  extern "C" fn PLDB_handle_state(handle: *mut DbHandle) -> c_int {
+    let result = handle.as_ref().unwrap().state();
+
+    result as c_int
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn PLDB_handle_get(handle: *mut DbHandle, out_val: *mut ValueMock) {
+    let val = handle.as_ref().unwrap().get();
+
+    out_val.write(value_build(val));
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn PLDB_close_and_free_handle(handle: *mut DbHandle) {
+    let hd = Box::from_raw(handle);
+    DbHandle::commit_and_close_vm(*hd);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn PLDB_free_handle(handle: *mut DbHandle) {
+    let _ = Box::from_raw(handle);
 }
 
 unsafe fn value_build(val: &Value) -> ValueMock {
