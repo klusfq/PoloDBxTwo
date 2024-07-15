@@ -2,6 +2,7 @@
 
 use polodb_core::{DbContext, DbErr, DbHandle, TransactionType, Config};
 use polodb_bson::{ObjectId, Document, Array, Value};
+use polodb_bson::linked_hash_map::Iter;
 use polodb_bson::ty_int::*;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -9,7 +10,6 @@ use std::os::raw::{c_char, c_uint, c_int, c_double, c_longlong};
 use std::ptr::{null_mut, write_bytes, null};
 use std::ffi::{CStr, CString};
 use std::borrow::Borrow;
-use std::result;
 
 const DB_ERROR_MSG_SIZE: usize = 512;
 
@@ -357,7 +357,6 @@ pub unsafe extern "C" fn PLDB_doc_set(doc: *mut Rc<Document>, key: *const c_char
     let ckey = CStr::from_ptr(key);
     let rkey = ckey.to_str().unwrap();
 
-    // debug_mem(&val);
     let v = value_parse(&val);
 
     let _ = Rc::get_mut(rdoc).unwrap().insert(rkey.to_string(), v);
@@ -389,8 +388,12 @@ pub unsafe extern "C" fn PLDB_doc_len(doc: *mut Rc<Document>) -> c_uint {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn PLDB_doc_iter(doc: *mut Rc<Document>) -> *mut Iter<String, Value> {
-    // TODO:
+pub unsafe extern "C" fn PLDB_doc_iter(doc: *mut Rc<Document>) -> *mut Iter<'static, String, Value> {
+    let r_iter = doc.as_ref().unwrap().iter();
+
+    let o_iter = Box::new(r_iter);
+
+    Box::into_raw(o_iter)
 }
 
 #[no_mangle]
@@ -399,14 +402,30 @@ pub unsafe extern "C" fn PLDB_doc_iter_next(
     key_buffer: *mut c_char,
     key_buffer_size: c_uint,
     out_val: *mut ValueMock,
-) -> c_int {
-    // TODO:
+) -> c_uint {
+    let r_iter: &mut Iter<String, Value> = iter.as_mut().unwrap();
+    if let Some((x_key, x_val)) = r_iter.next() {
+        let o_key: String = x_key.clone();
+        if o_key.len() > key_buffer_size as usize {
+            return 0;
+        }
+
+        let expected_len = std::cmp::min(o_key.len(), key_buffer_size as usize);
+        let o_key_str = CString::new(o_key).unwrap();
+        o_key_str.as_ptr().copy_to(key_buffer, expected_len);
+
+        let o_val = value_build(&x_val);
+        out_val.write(o_val);
+
+        return expected_len as u32;
+    }
+
+    0
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn PLDB_free_doc_iter(iter: *mut Iter<String, Value>) {
-    // TODO:
-
+    drop(Box::from_raw(iter));
 }
 
 #[no_mangle]
@@ -439,7 +458,7 @@ pub unsafe extern "C" fn PLDB_handle_get(handle: *mut DbHandle, out_val: *mut Va
 #[no_mangle]
 pub unsafe extern "C" fn PLDB_close_and_free_handle(handle: *mut DbHandle) {
     let hd = Box::from_raw(handle);
-    DbHandle::commit_and_close_vm(*hd);
+    DbHandle::commit_and_close_vm(*hd).unwrap();
 }
 
 #[no_mangle]
